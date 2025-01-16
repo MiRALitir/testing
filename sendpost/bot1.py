@@ -1,4 +1,5 @@
 from telethon import TelegramClient
+from telebot import TeleBot
 import sqlite3
 import asyncio
 import logging
@@ -9,26 +10,37 @@ import aiohttp
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# تنظیمات ربات و API
 API_ID = 21266027
 API_HASH = '8563c2456fa80793ccf835eec5be4a72'
 SESSION_NAME = '989169713311.session'
 BOT_TOKEN = '7656738137:AAFJVHFXgdLn5d20lDQFzRylsnDapur6xuE'
 
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-
 # اتصال به دیتابیس
-try:
-    conn = sqlite3.connect('requests.db')
-    cursor = conn.cursor()
-    logger.info("اتصال به دیتابیس برقرار شد.")
-except sqlite3.Error as e:
-    logger.error(f"خطا در اتصال به دیتابیس: {e}")
-    exit()
+conn = sqlite3.connect('requests.db', check_same_thread=False)
+cursor = conn.cursor()
+
+# ساخت جدول در صورت عدم وجود
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    link TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+""")
+conn.commit()
 
 # مسیر ذخیره‌سازی موقت فایل‌ها
 TEMP_DIR = 'temp_downloads'
 os.makedirs(TEMP_DIR, exist_ok=True)
 
+# ایجاد کلاینت‌های Telethon و TeleBot
+client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+bot = TeleBot(BOT_TOKEN)
+
+# ارسال پیام یا فایل به کاربر
 async def send_to_bot(user_id, text=None, file_path=None):
     if text:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -49,6 +61,7 @@ async def send_to_bot(user_id, text=None, file_path=None):
         except Exception as e:
             logger.error(f"خطا در ارتباط با ربات: {e}")
 
+# دانلود و ارسال مدیا
 async def download_and_send_media(message, user_id):
     try:
         file_path = await message.download_media(file=TEMP_DIR)
@@ -58,6 +71,7 @@ async def download_and_send_media(message, user_id):
     except Exception as e:
         logger.error(f"خطا در دانلود و ارسال مدیا: {e}")
 
+# پردازش درخواست‌ها
 async def process_requests():
     while True:
         cursor.execute("SELECT id, user_id, link FROM requests WHERE status = 'pending'")
@@ -94,14 +108,33 @@ async def process_requests():
             except Exception as e:
                 logger.error(f"خطا در پردازش لینک {link}: {e}")
                 cursor.execute("UPDATE requests SET status = 'failed' WHERE id = ?", (req_id,))
-                await send_to_bot(user_id, text="❌ خطا در دریافت پیام.")
+                await send_to_bot(user_id, text="\u274C خطا در دریافت پیام.")
 
         conn.commit()
         await asyncio.sleep(5)
 
-with client:
-    try:
-        logger.info("شروع کلاینت تلگرام...")
-        client.loop.run_until_complete(process_requests())
-    except Exception as e:
-        logger.critical(f"خطا در اجرای کلاینت: {e}")
+# مدیریت پیام‌های TeleBot
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "سلام! لینک پست را با دستور /getpost ارسال کنید.")
+
+@bot.message_handler(commands=['getpost'])
+def get_post(message):
+    bot.send_message(message.chat.id, "لینک پست را ارسال کنید:")
+    bot.register_next_step_handler(message, save_request)
+
+def save_request(message):
+    link = message.text
+    cursor.execute("INSERT INTO requests (user_id, link, status) VALUES (?, ?, ?)", 
+                   (message.chat.id, link, 'pending'))
+    conn.commit()
+    bot.send_message(message.chat.id, "درخواست شما ثبت شد و در حال پردازش است.")
+
+# اجرای هم‌زمان کلاینت‌ها
+async def main():
+    async with client:
+        # شروع ربات تلگرام
+        await asyncio.gather(process_requests(), bot.polling())
+
+if __name__ == "__main__":
+    asyncio.run(main())
