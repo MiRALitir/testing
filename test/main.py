@@ -59,10 +59,11 @@ async def myid(event):
     cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
     db_user = cursor.fetchone()
 
-    if not db_user:
+    # اگر کاربر وجود نداشت یا شماره ثبت نشده باشد
+    if not db_user or not db_user[2]:  # ستون 2 برای شماره تلفن
         # درخواست شماره تلفن از کاربر
-        btn = [[Button.request_phone('ارسال شماره تلفن', single_use=True)]]
-        await event.reply("برای استفاده از این ربات ابتدا باید شماره تلفن خود را ارسال کنید.", buttons=btn)
+        btn = [[Button.request_phone('📞 ارسال شماره تلفن', single_use=True, resize=True)]]
+        await event.reply("❗️ برای استفاده از این ربات ابتدا باید شماره تلفن خود را ارسال کنید.", buttons=btn)
         return
 
     # دریافت اطلاعات کامل کاربر از طریق Telethon
@@ -123,7 +124,8 @@ async def handle_contact(event):
 
         conn.commit()
 
-        await event.reply("شماره شما با موفقیت ثبت شد. اکنون می‌توانید مجدداً دستور /myid را ارسال کنید.")
+        await event.reply("✅ شماره شما با موفقیت ثبت شد. اکنون می‌توانید مجدداً دستور /myid را ارسال کنید.")
+
 @bot.on(events.NewMessage(pattern=r'/admin'))
 async def admin_panel(event):
     if event.sender_id == admin_id:
@@ -143,11 +145,11 @@ async def callback_handler(event):
     if data == 'accept_user':
         cursor.execute("UPDATE users SET request_count = request_count + 1 WHERE id = ?", (user_id,))
         conn.commit()
-        await event.respond("اطلاعات کاربر ثبت شد.", alert=True)
+        await event.answer("اطلاعات کاربر ثبت شد.", alert=False)
 
     elif data == 'reject_user':
         await bot.send_message(user_id, "اطلاعات شما مورد پذیرش قرار نگرفت.")
-        await event.respond("اطلاعات کاربر رد شد.", alert=True)
+        await event.answer("اطلاعات کاربر رد شد.", alert=False)
 
     elif data == 'message_user':
         await bot.send_message(admin_id, "پیام خود را وارد کنید و ارسال نمایید.")
