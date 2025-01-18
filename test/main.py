@@ -3,8 +3,8 @@ import time
 
 from config import admin_id, api_hash, api_id, token
 from telethon import Button, TelegramClient, events
-from telethon.tl.functions.photos import GetProfilePhotos
-from telethon.tl.functions.users import GetFullUser
+# from telethon.tl.functions.photos import GetProfilePhotos
+from telethon.tl.functions.users import GetFullUserRequest
 
 conn = sqlite3.connect('poster.db', check_same_thread=False)
 cursor = conn.cursor()
@@ -55,21 +55,26 @@ async def show_help(event):
 async def myid(event):
     user_id = event.sender_id
 
+    # بررسی وجود کاربر در پایگاه داده
     cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    user = cursor.fetchone()
+    db_user = cursor.fetchone()
 
-    if not user:
+    if not db_user:
+        # درخواست شماره تلفن از کاربر
         btn = [[Button.request_phone('ارسال شماره تلفن', single_use=True)]]
         await event.reply("برای استفاده از این ربات ابتدا باید شماره تلفن خود را ارسال کنید.", buttons=btn)
         return
 
-    full_user = await bot(GetFullUser(user_id))
-    username = full_user.user.username or "ندارد"
-    bio = full_user.about or "ندارد"
-    fullname = f"{full_user.user.first_name or ''} {full_user.user.last_name or ''}".strip()
+    # دریافت اطلاعات کامل کاربر از طریق Telethon
+    full_user = await event.client(GetFullUserRequest(user_id))
+    user = full_user.users[0]  # دسترسی به اولین کاربر موجود در UserFull
+    username = user.username or "ندارد"
+    bio = full_user.full_user.about or "ندارد"  # دسترسی به بیو
+    fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
 
-    if user[1] != username:
-        old_username = user[1] or "ندارد"
+    # بررسی تغییرات در یوزرنیم
+    if db_user[1] != username:
+        old_username = db_user[1] or "ندارد"
         cursor.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
         conn.commit()
 
@@ -79,23 +84,27 @@ async def myid(event):
                   f"➡️ به: {username}\n")
         await bot.send_message(admin_id, report)
 
-    request_count = user[6] + 1
+    # به‌روزرسانی تعداد درخواست‌ها
+    request_count = db_user[6] + 1
     cursor.execute("UPDATE users SET request_count = ? WHERE id = ?", (request_count, user_id))
     conn.commit()
 
-    photos = await bot(GetProfilePhotos(user_id))
-    profile_photo_id = photos.photos[0].id if photos.photos else "ندارد"
-    if user[5] != profile_photo_id:
+    # دریافت تصویر پروفایل
+    photos = await bot.get_profile_photos(user_id)
+    profile_photo_id = photos[0].id if photos else "ندارد"
+
+    if db_user[5] != profile_photo_id:
         cursor.execute("UPDATE users SET profile_photo_id = ? WHERE id = ?", (profile_photo_id, user_id))
         conn.commit()
 
+    # ساخت پیام پاسخ
     msg = (f"👤 اطلاعات شما:\n"
            f"🔑 آیدی عددی: {user_id}\n"
            f"💛 یوزرنیم: {username}\n"
-           f"📞 شماره: {user[2]}\n"
+           f"📞 شماره: {db_user[2]}\n"
            f"👥 نام کامل: {fullname}\n"
            f"📝 بیو: {bio}\n"
-           f"🖼️ تصویر پروفایل: {'دارد' if photos.photos else 'ندارد'}\n"
+           f"🖼️ تصویر پروفایل: {'دارد' if photos else 'ندارد'}\n"
            f"🔢 تعداد درخواست‌ها: {request_count}")
     await event.reply(msg)
 
@@ -198,7 +207,7 @@ async def update_last_active(event):
     last_active = int(time.time())
     cursor.execute("UPDATE users SET last_active = ? WHERE id = ?", (last_active, user_id))
     conn.commit()
-    await event.reply("✅ تاریخ آخرین فعالیت شما به‌روزرسانی شد.")
+    # await event.reply("✅ تاریخ آخرین فعالیت شما به‌روزرسانی شد.")
 
 @bot.on(events.NewMessage(pattern=r'/inactive'))
 async def show_inactive_users(event):
@@ -224,12 +233,13 @@ async def save_user(event):
     cursor.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
     conn.commit()
 
-@bot.on(events.NewMessage(func=lambda e: e.is_private))
-async def update_last_active(event):
-    user_id = event.sender_id
-    last_active = int(time.time())
-    cursor.execute("UPDATE users SET last_active = ? WHERE id = ?", (last_active, user_id))
-    conn.commit()
-    await event.reply("✅ تاریخ آخرین فعالیت شما به‌روزرسانی شد.")
-    
+# @bot.on(events.NewMessage(func=lambda e: e.is_private))
+# async def update_last_active(event):
+#     user_id = event.sender_id
+#     last_active = int(time.time())
+#     cursor.execute("UPDATE users SET last_active = ? WHERE id = ?", (last_active, user_id))
+#     conn.commit()
+#     await event.reply("✅ تاریخ آخرین فعالیت شما به‌روزرسانی شد.")
+
+print('Run')
 bot.run_until_disconnected()
