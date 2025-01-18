@@ -136,7 +136,8 @@ async def admin_panel(event):
     if event.sender_id == admin_id:
         buttons = [
             [Button.inline('ثبت اطلاعات کاربر', b'accept_user'), Button.inline('رد اطلاعات کاربر', b'reject_user')],
-            [Button.inline('پیام به کاربر', b'message_user')]
+            [Button.inline('پیام به کاربر', b'message_user')],
+            [Button.inline('اطلاعات تمام کاربران', b'show_users')]  # دکمه برای مشاهده اطلاعات کاربران
         ]
         await event.reply("✅ بخش مدیریت", buttons=buttons)
     else:
@@ -163,6 +164,75 @@ async def callback_handler(event):
             message = event.raw_text
             await bot.send_message(user_id, f"پیام از ادمین: {message}")
             await bot.send_message(admin_id, "پیام شما ارسال شد.")
+    
+    # بخش جدید برای نمایش تعداد کاربران و دکمه‌های ادامه و بازگشت
+    elif data == 'show_users':
+        try:
+            # شمارش تعداد کاربران
+            cursor.execute("SELECT COUNT(*) FROM users")
+            count = cursor.fetchone()[0]
+
+            # ارسال تعداد کاربران به ادمین
+            buttons = [
+                [Button.inline('ادامه', b'continue_show_users'), Button.inline('بازگشت', b'back_to_admin')]
+            ]
+            await event.edit(f"👥 تعداد کاربران ثبت‌شده: {count}", buttons=buttons)
+
+        except Exception as e:
+            await event.answer(f"❌ خطایی رخ داد:\n`{e}`", alert=False)
+
+    # ادامه عملیات نمایش اطلاعات کاربران
+    elif data == 'continue_show_users':
+        try:
+            cursor.execute("SELECT * FROM users")
+            users = cursor.fetchall()
+
+            if not users:
+                await event.answer("⚠️ هیچ کاربری در دیتابیس ثبت نشده است.", alert=False)
+                return
+
+            for user in users:
+                user_id = user[0]
+                username = user[1] or "ندارد"
+                phone = user[2] or "ندارد"
+                fullname = user[3] or "ندارد"
+                profile_photo_id = user[5] or "ندارد"
+                request_count = user[6] or 0
+
+                try:
+                    full_user = await event.client(GetFullUserRequest(user_id))
+                    bio = full_user.full_user.about or "ندارد"
+                except Exception:
+                    bio = "نامشخص"
+
+                user_info = (
+                    f"👤 **کاربر:**\n"
+                    f"🔑 آیدی عددی: `{user_id}`\n"
+                    f"💛 یوزرنیم: `{username}`\n"
+                    f"📞 شماره: `{phone}`\n"
+                    f"👥 نام کامل: `{fullname}`\n"
+                    f"📝 بیو: `{bio}`\n"
+                    f"🖼️ تصویر پروفایل: {'دارد' if profile_photo_id != 'ندارد' else 'ندارد'}\n"
+                    f"🔢 تعداد درخواست‌ها: `{request_count}`\n"
+                    f"— — — — —"
+                )
+
+                # ارسال اطلاعات کاربر به ادمین
+                await bot.send_message(admin_id, user_info)
+
+            await event.answer("✅ اطلاعات کاربران با موفقیت ارسال شد.", alert=False)
+            await event.respond("✅ اطلاعات کاربران با موفقیت ارسال شد.")
+        except Exception as e:
+            await event.answer(f"❌ خطایی رخ داد:\n`{e}`", alert=False)
+
+    # برگشت به پنل مدیریت
+    elif data == 'back_to_admin':
+        buttons = [
+            [Button.inline('ثبت اطلاعات کاربر', b'accept_user'), Button.inline('رد اطلاعات کاربر', b'reject_user')],
+            [Button.inline('پیام به کاربر', b'message_user')],
+            [Button.inline('اطلاعات تمام کاربران', b'show_users')]  # دکمه برای مشاهده اطلاعات کاربران
+        ]
+        await event.edit("✅ بازگشت به پنل مدیریت", buttons=buttons)
 
 @bot.on(events.NewMessage(pattern=r'/usercount'))
 async def user_count(event):
@@ -261,8 +331,8 @@ async def show_inactive_users(event):
             await event.reply(msg)
         else:
             await event.reply("✅ هیچ کاربر غیرفعالی یافت نشد.")
-    else:
-        await event.reply("❌ شما دسترسی ادمین ندارید.")
+    # else:
+    #     await event.reply("❌ شما دسترسی ادمین ندارید.")
 
 @bot.on(events.NewMessage(func=lambda e: e.is_private))
 async def save_user(event):
@@ -273,20 +343,18 @@ async def save_user(event):
     conn.commit()
 @bot.on(events.NewMessage(pattern=r'/staff'))
 async def staff_info(event):
-    if event.sender_id != admin_id:  # فقط ادمین اجازه استفاده دارد
+    if event.sender_id != admin_id:
         await event.reply("❌ شما مجاز به استفاده از این دستور نیستید.")
         return
 
     try:
-        # بازیابی تمام کاربران از دیتابیس
         cursor.execute("SELECT * FROM users")
         users = cursor.fetchall()
 
-        if not users:  # اگر دیتابیس خالی باشد
+        if not users:
             await event.reply("⚠️ هیچ کاربری در دیتابیس ثبت نشده است.")
             return
 
-        # قالب‌بندی اطلاعات کاربران
         for user in users:
             user_id = user[0]
             username = user[1] or "ندارد"
@@ -295,7 +363,6 @@ async def staff_info(event):
             profile_photo_id = user[5] or "ندارد"
             request_count = user[6] or 0
 
-            # دریافت بیو از تلگرام
             try:
                 full_user = await event.client(GetFullUserRequest(user_id))
                 bio = full_user.full_user.about or "ندارد"
