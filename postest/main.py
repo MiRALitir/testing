@@ -2,6 +2,7 @@ import random
 import sqlite3
 import string
 
+import telethon
 from config import api_hash, api_id, token
 from telethon import Button, TelegramClient, events
 from telethon.tl.custom.message import Message
@@ -18,6 +19,14 @@ CREATE TABLE IF NOT EXISTS users (
     referral_code TEXT,
     referrer_id INTEGER,
     posts INTEGER DEFAULT 0
+);
+""")
+conn.commit()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS locked_channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_username TEXT UNIQUE
 );
 """)
 conn.commit()
@@ -155,10 +164,14 @@ async def admin_panel(event):
 
     # ایجاد پنل دکمه شیشه‌ای
     buttons = [
-        [Button.inline("📋 لیست کاربران", b"list_users")],
-        [Button.inline("👤 مشاهده امتیاز کاربر", b"view_points")],
-        [Button.inline("📝 تغییر امتیاز کاربر", b"update_points")],
+    [Button.inline("📋 لیست کاربران", b"list_users")],
+    [Button.inline("👤 مشاهده امتیاز کاربر", b"view_points")],
+    [Button.inline("📝 تغییر امتیاز کاربر", b"update_points")],
+    [Button.inline("➕ افزودن کانال", b"add_channel")],
+    [Button.inline("❌ حذف کانال", b"remove_channel")],
+    [Button.inline("📋 مشاهده کانال‌ها", b"view_channels")]
     ]
+
 
     await event.reply("📊 پنل مدیریت:", buttons=buttons)
 
@@ -224,6 +237,76 @@ async def callback_handler(event):
             else:
                 await msg_event.reply("❌ کاربر موردنظر یافت نشد.")
             bot.remove_event_handler(update_user_points)
+    elif data == "add_channel":
+        await event.edit("➕ لطفاً نام کاربری کانال را به این فرمت ارسال کنید:\n`@channel_username`")
+
+        @bot.on(events.NewMessage(func=lambda e: e.sender_id == event.sender_id))
+        async def add_channel_handler(msg_event):
+            channel_username = msg_event.text.strip()
+
+            if not channel_username.startswith("@"):
+                await msg_event.reply("❌ فرمت نادرست است. لطفاً دوباره تلاش کنید.")
+                return
+
+            try:
+                cursor.execute("INSERT INTO locked_channels (channel_username) VALUES (?)", (channel_username,))
+                conn.commit()
+                await msg_event.reply(f"✅ کانال {channel_username} با موفقیت اضافه شد.")
+            except sqlite3.IntegrityError:
+                await msg_event.reply("❌ این کانال قبلاً اضافه شده است.")
+            bot.remove_event_handler(add_channel_handler)
+        
+    elif data == "remove_channel":
+        await event.edit("❌ لطفاً نام کاربری کانال را برای حذف ارسال کنید:\n`@channel_username`")
+
+        @bot.on(events.NewMessage(func=lambda e: e.sender_id == event.sender_id))
+        async def remove_channel_handler(msg_event):
+            channel_username = msg_event.text.strip()
+
+            cursor.execute("DELETE FROM locked_channels WHERE channel_username = ?", (channel_username,))
+            conn.commit()
+
+            if cursor.rowcount > 0:
+                await msg_event.reply(f"✅ کانال {channel_username} با موفقیت حذف شد.")
+            else:
+                await msg_event.reply("❌ کانال موردنظر یافت نشد.")
+            bot.remove_event_handler(remove_channel_handler)
+        
+    elif data == "view_channels":
+        cursor.execute("SELECT channel_username FROM locked_channels")
+        channels = cursor.fetchall()
+
+        if channels:
+            channel_list = "\n".join([f"- {channel[0]}" for channel in channels])
+            await event.edit(f"📋 لیست کانال‌های قفل‌شده:\n{channel_list}")
+        else:
+            await event.edit("📋 لیست کانال‌های قفل‌شده خالی است.")
+
+async def check_membership(user_id):
+    cursor.execute("SELECT channel_username FROM locked_channels")
+    channels = cursor.fetchall()
+
+    for channel in channels:
+        try:
+            member = await bot.get_participants(channel[0], filter=telethon.tl.types.ChannelParticipantsSearch(str(user_id)))
+            if not member:
+                return False, channel[0]
+        except Exception as e:
+            print(f"Error checking membership: {e}")
+            return False, channel[0]
+    return True, None
+
+@bot.on(events.NewMessage(pattern='/post'))
+async def post(event: Message):
+    user_id = event.sender_id
+
+    is_member, missing_channel = await check_membership(user_id)
+    if not is_member:
+        await event.reply(f"⛔ شما عضو کانال {missing_channel} نیستید. لطفاً ابتدا عضو شوید.")
+        return
+
+    # ادامه دستور /post
+    await event.reply("✅ شما می‌توانید ادامه دهید.")
 
 print("✅ Bot is running...")
 bot.run_until_disconnected()
