@@ -69,8 +69,17 @@ async def start(event: Message):
     conn.commit()
 
     if referrer_id:
+        # اضافه کردن امتیاز به صاحب لینک
         cursor.execute("UPDATE users SET points = points + 5 WHERE id = ?", (referrer_id,))
         conn.commit()
+
+        # ارسال پیام به صاحب لینک
+        cursor.execute("SELECT username FROM users WHERE id = ?", (referrer_id,))
+        referrer_username = cursor.fetchone()[0]
+        await bot.send_message(
+            referrer_id,
+            f"🎉 کاربر جدید با یوزرنیم @{username} با لینک شما وارد شد!\n💰 به شما ۵ امتیاز تعلق گرفت."
+        )
 
 @bot.on(events.NewMessage(func=lambda e: e.contact))
 async def handle_contact(event: Message):
@@ -118,6 +127,10 @@ async def show_referrals(event: Message):
 async def show_points(event: Message):
     user_id = event.sender_id
 
+    if is_admin(user_id):
+        await event.reply("شما ادمین هستید ، امتیاز شما نامحدود است 💎")
+        return
+
     cursor.execute("SELECT points FROM users WHERE id = ?", (user_id,))
     result = cursor.fetchone()
 
@@ -126,6 +139,91 @@ async def show_points(event: Message):
         await event.reply(f"امتیازات فعلی شما: {points} امتیاز")
     else:
         await event.reply("شما هنوز ثبت‌نام نکرده‌اید. لطفاً ابتدا دستور /start را وارد کنید.")
+
+ADMINS = [123456789, 6087657605]
+
+def is_admin(user_id):
+    return user_id in ADMINS
+
+@bot.on(events.NewMessage(pattern='/admin_panel'))
+async def admin_panel(event):
+    user_id = event.sender_id
+
+    if not is_admin(user_id):
+        await event.reply("⛔ شما دسترسی به این دستور ندارید.")
+        return
+
+    # ایجاد پنل دکمه شیشه‌ای
+    buttons = [
+        [Button.inline("📋 لیست کاربران", b"list_users")],
+        [Button.inline("👤 مشاهده امتیاز کاربر", b"view_points")],
+        [Button.inline("📝 تغییر امتیاز کاربر", b"update_points")],
+    ]
+
+    await event.reply("📊 پنل مدیریت:", buttons=buttons)
+
+@bot.on(events.CallbackQuery)
+async def callback_handler(event):
+    data = event.data.decode("utf-8")
+
+    # مدیریت هر دکمه
+    if data == "list_users":
+        cursor.execute("SELECT id, username, points FROM users;")
+        users = cursor.fetchall()
+
+        if users:
+            user_list = "\n".join([f"""ID: `{user[0]}`\nUsername: `{user[1]}`\nPoints: {user[2]}\n-----------------""" for user in users])
+            await event.edit(f"📋 لیست کاربران:\n{user_list}")
+        else:
+            await event.edit("📋 لیست کاربران خالی است.")
+
+    elif data == "view_points":
+        await event.edit("👤 لطفاً شناسه کاربر را ارسال کنید:")
+        
+        @bot.on(events.NewMessage(func=lambda e: e.sender_id == event.sender_id))
+        async def get_user_id(msg_event):
+            target_id = int(msg_event.text)
+            cursor.execute("SELECT username, points FROM users WHERE id = ?", (target_id,))
+            user = cursor.fetchone()
+
+            if user:
+                await msg_event.reply(f"👤 کاربر: @{user[0]}\n💰 امتیازات: {user[1]}")
+            else:
+                await msg_event.reply("❌ کاربر موردنظر یافت نشد.")
+            bot.remove_event_handler(get_user_id)
+
+    elif data == "update_points":
+        await event.edit("📝 لطفاً شناسه کاربر و مقدار امتیاز را به این فرمت ارسال کنید:\n`user_id points_change`")
+
+        @bot.on(events.NewMessage(func=lambda e: e.sender_id == event.sender_id))
+        async def update_user_points(msg_event):
+            args = msg_event.text.split()
+            if len(args) < 2:
+                await msg_event.reply("⚠️ فرمت نادرست است. لطفاً دوباره ارسال کنید.")
+                return
+
+            target_id = int(args[0])
+            points_change = int(args[1])
+
+            if is_admin(target_id):
+                await msg_event.reply("❌ نمی‌توانید امتیازات ادمین را تغییر دهید.")
+                return
+
+            cursor.execute("SELECT points FROM users WHERE id = ?", (target_id,))
+            user = cursor.fetchone()
+
+            if user:
+                new_points = user[0] + points_change
+                cursor.execute("UPDATE users SET points = ? WHERE id = ?", (new_points, target_id))
+                conn.commit()
+                await msg_event.reply(f"""✅ امتیازات کاربر {target_id} 
+امتیاز قبلی کاربر : {user[0]}                                      
+💰 امتیاز جدید: {new_points}
+میزان تغییر امتیاز : {points_change}
+به‌روزرسانی شد.""")
+            else:
+                await msg_event.reply("❌ کاربر موردنظر یافت نشد.")
+            bot.remove_event_handler(update_user_points)
 
 print("✅ Bot is running...")
 bot.run_until_disconnected()
