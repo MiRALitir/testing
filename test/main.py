@@ -143,10 +143,13 @@ async def admin_panel(event):
     else:
         await event.reply("شما دسترسی ادمین ندارید.")
 
+user_id = None
+waiting_for_message = False
+
 @bot.on(events.CallbackQuery())
 async def callback_handler(event):
+    global user_id, waiting_for_message
     data = event.data.decode('utf-8')
-    user_id = event.sender_id
 
     if data == 'accept_user':
         cursor.execute("UPDATE users SET request_count = request_count + 1 WHERE id = ?", (user_id,))
@@ -158,21 +161,54 @@ async def callback_handler(event):
         await event.answer("اطلاعات کاربر رد شد.", alert=False)
 
     elif data == 'message_user':
-        await bot.send_message(admin_id, "پیام خود را وارد کنید و ارسال نمایید.")
-        @bot.on(events.NewMessage(func=lambda e: e.is_private and e.sender_id == admin_id))
-        async def admin_message(event):
-            message = event.raw_text
-            await bot.send_message(user_id, f"پیام از ادمین: {message}")
-            await bot.send_message(admin_id, "پیام شما ارسال شد.")
-    
+        # درخواست آیدی از ادمین
+        if waiting_for_message:
+            await event.answer("شما در حال حاضر در حال ارسال پیام به یک کاربر هستید. لطفاً ابتدا پیام خود را ارسال کنید.", alert=False)
+            return
+
+        await event.answer("لطفاً آیدی عددی کاربر را وارد کنید.", alert=False)
+        user_id = None  # ابتدا آیدی را صفر می‌کنیم
+        waiting_for_message = False  # در ابتدا منتظر پیام نیستیم
+
+        @bot.on(events.NewMessage(func=lambda e: e.sender_id == admin_id))
+        async def get_user_id(event):
+            global user_id, waiting_for_message
+            user_id_input = event.raw_text.strip()
+            try:
+                user_id = int(user_id_input)
+                # بررسی اینکه آیدی وارد شده معتبر باشد
+                await event.reply(f"آیدی وارد شده: {user_id}\nحالا لطفاً پیام خود را وارد کنید:", buttons=[Button.inline('بازگشت', b'back_to_admin')])
+                waiting_for_message = True  # نشان می‌دهیم که در حال انتظار برای پیام بعدی هستیم
+            except ValueError:
+                await event.reply("❌ آیدی وارد شده معتبر نیست. لطفاً دوباره تلاش کنید.", buttons=[Button.inline('بازگشت', b'back_to_admin')])
+
+        # مدیریت پیام بعدی (پیام ادمین برای ارسال به کاربر)
+        @bot.on(events.NewMessage(func=lambda e: e.sender_id == admin_id))
+        async def get_message(event):
+            global user_id, waiting_for_message
+            if not waiting_for_message:
+                return  # اگر هنوز منتظر پیام دوم نیستیم، کدی اجرا نمی‌شود
+
+            message = event.raw_text.strip()
+            if message.isdigit():
+                await event.reply("❌ لطفاً پیام معتبر وارد کنید.")
+                return
+
+            try:
+                # ارسال پیام به کاربر
+                await bot.send_message(user_id, f"پیام از ادمین: {message}")
+                await event.reply("✅ پیام شما با موفقیت به کاربر ارسال شد.", buttons=[Button.inline('بازگشت', b'back_to_admin')])
+                waiting_for_message = False  # پس از ارسال پیام، وضعیت را بازنشانی می‌کنیم
+
+            except Exception as e:
+                await event.reply(f"❌ خطا در ارسال پیام: {e}", buttons=[Button.inline('بازگشت', b'back_to_admin')])
+
     # بخش جدید برای نمایش تعداد کاربران و دکمه‌های ادامه و بازگشت
     elif data == 'show_users':
         try:
-            # شمارش تعداد کاربران
             cursor.execute("SELECT COUNT(*) FROM users")
             count = cursor.fetchone()[0]
 
-            # ارسال تعداد کاربران به ادمین
             buttons = [
                 [Button.inline('ادامه', b'continue_show_users'), Button.inline('بازگشت', b'back_to_admin')]
             ]
@@ -217,7 +253,6 @@ async def callback_handler(event):
                     f"— — — — —"
                 )
 
-                # ارسال اطلاعات کاربر به ادمین
                 await bot.send_message(admin_id, user_info)
 
             await event.answer("✅ اطلاعات کاربران با موفقیت ارسال شد.", alert=False)
