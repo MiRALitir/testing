@@ -5,7 +5,10 @@ import string
 import telethon
 from config import api_hash, api_id, token
 from telethon import Button, TelegramClient, events
+from telethon.errors import UserNotParticipantError
 from telethon.tl.custom.message import Message
+from telethon.tl.functions.channels import GetParticipantRequest
+from telethon.tl.types import ChannelParticipantsSearch
 
 conn = sqlite3.connect('poster.db', check_same_thread=False)
 cursor = conn.cursor()
@@ -282,19 +285,54 @@ async def callback_handler(event):
         else:
             await event.edit("📋 لیست کانال‌های قفل‌شده خالی است.")
 
-async def check_membership(user_id):
+@bot.on(events.NewMessage(pattern='/check_membership'))
+async def check_user_membership(event):
+    user_id = event.sender_id
+
+    # بررسی عضویت کاربر
+    is_member, missing_channels = await check_membership(user_id)
+
+    if is_member:
+        await event.reply("✅ شما در همه چنل‌های موردنظر عضو هستید.")
+    else:
+        channels_list = "\n".join([f"@{ch}" for ch in missing_channels])
+        await event.reply(f"❌ شما در چنل‌های زیر عضو نیستید:\n{channels_list}\nلطفاً ابتدا عضو شوید.")
+
+async def get_missing_channels_from_db(user_id):
+    """
+    بررسی عضویت کاربر در چنل‌های قفل‌شده که در دیتابیس تعریف شده‌اند.
+    """
+    missing_channels = []
+
+    # گرفتن لیست چنل‌ها از دیتابیس
     cursor.execute("SELECT channel_username FROM locked_channels")
     channels = cursor.fetchall()
 
     for channel in channels:
         try:
-            member = await bot.get_participants(channel[0], filter=telethon.tl.types.ChannelParticipantsSearch(str(user_id)))
-            if not member:
-                return False, channel[0]
+            # بررسی عضویت کاربر در هر چنل
+            await bot(GetParticipantRequest(channel[0], user_id))
+        except UserNotParticipantError:
+            # اگر کاربر عضو نبود، به لیست اضافه می‌شود
+            missing_channels.append(channel[0])
         except Exception as e:
-            print(f"Error checking membership: {e}")
-            return False, channel[0]
-    return True, None
+            print(f"Error checking channel {channel[0]}: {e}")
+
+    return missing_channels
+
+
+async def check_membership(user_id):
+    """
+    بررسی عضویت کاربر در تمام چنل‌ها و بازگرداندن اولین چنلی که عضو نیست.
+    """
+    missing_channels = await get_missing_channels_from_db(user_id)
+
+    if missing_channels:
+        # اگر چنل‌هایی وجود داشت که کاربر عضو نیست
+        return False, missing_channels
+    else:
+        # اگر کاربر در همه چنل‌ها عضو بود
+        return True, None
 
 @bot.on(events.NewMessage(pattern='/post'))
 async def post(event: Message):
