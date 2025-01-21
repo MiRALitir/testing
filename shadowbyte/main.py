@@ -1,3 +1,5 @@
+import json
+import os
 import random
 import sqlite3
 import string
@@ -10,119 +12,145 @@ from telethon.tl.functions.channels import GetParticipantRequest
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.types import ChannelParticipantsSearch
 
-# راه‌اندازی ربات تلگرام
 bot = TelegramClient('shadowbyte', api_id=api_id, api_hash=api_hash).start(bot_token=token)
 
-# شناسه‌های مدیران
 ADMIN_IDS = admin_ids
 
-# اتصال به دیتابیس SQLite
-conn = sqlite3.connect('orders.db')
-cursor = conn.cursor()
-
-# جدول ذخیره سفارشات
-cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
-                    order_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    order_status TEXT,
-                    order_details TEXT
-                 )''')
-conn.commit()
-
-# نمایش منوی اصلی
 @bot.on(events.NewMessage(pattern=r'/start'))
 async def start(event: Message):
     msg = '''درود کاربر گرامی به ربات ثبت سفارش شدو بایت خوش اومدید
-این ربات برای ثبت سفارش ساخت ربات تلگرام از مجموعه @MiRALi_SHOP_OG ساخته شده . 
+این ربات برای ثبت سفارش ساخت ربات تلگرام از مجموعه @MiRALi_SHOP_OG ساخته شده .
 برای دریافت راهنمایی بیشتر درمورد ربات ، میتونید از بخش راهنما استفاده کنید !
 '''
     btn = [
         [Button.text('ثبت سفارش 📝', resize=True, single_use=True)],
         [Button.text('سفارشات 📄'), Button.text('مشخصات من 🔍')],
-        [Button.text('💡 راهنما'), Button.text('سوالات متداول ⚖️')],
-        [Button.text('☎️ پشتیبانی')],
-        [Button.force_reply(placeholder='MiRALi_OFFiCiAL |:')]
+        [Button.text('💡راهنما'), Button.text('سوالات متداول ⚖️')],
+        [Button.text('☎️ پشتیبانی')]
     ]
     await bot.send_message(entity=event.chat_id, message=msg, buttons=btn)
 
-# ثبت سفارش جدید
+
 @bot.on(events.NewMessage)
-async def order_handler(event: Message):
+async def start_handler(event: Message):
     text = event.message.text
+    user_id = event.sender_id
     
-    full_user = await event.client(GetFullUserRequest(event.sender_id))
+    full_user = await event.client(GetFullUserRequest(user_id))
     user = full_user.users[0]
     username = user.username or "ندارد"
     fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    bio = full_user.full_user.about or "ندارد"
+    photos = await bot.get_profile_photos(user_id)
+    if photos:
+        profile_photo = photos[0]
     
-    # بررسی دستور ثبت سفارش
     if text == 'ثبت سفارش 📝':
+        
         order_btn = [
-            [Button.inline("ادامه ✅", data='continue')],
-            [Button.inline("بازگشت", data='back')]
+            [Button.inline("ادامه ✅", data='continue_create_order')],
+            [Button.inline("بازگشت", data='back'), Button.inline("سوالات متداول", data='questions')]
         ]
-        await bot.send_message(entity=event.chat_id, message='اینجا بخش ثبت سفارش رباته \nبرای ادامه فرایند روی دکمه ادامه کلیک کنید \nدر غیر این صورت روی بازگشت کلیک کنید', buttons=order_btn)
+        
+        create_order = await bot.send_message(entity=event.chat_id, message='اینجا بخش ثبت سفارش رباته \nبرای ادامه فرایند روی دکمه ادامه کلیک کنید \nدر غیر این صورت روی بازگشت کلیک کنید', buttons=order_btn)
 
-    # نمایش مشخصات کاربر
     elif text == 'مشخصات من 🔍':
+        
         profile_msg = (f"👤 اطلاعات شما:\n"
-                       f"🔑 آیدی عددی: {event.sender_id}\n"
-                       f"💛 یوزرنیم: {username}\n"
-                       f"👥 نام کامل: {fullname}\n"
-                       "تعداد سفارشات ثبت شده : {order_count}")
+           f"🔑 آیدی عددی: {user_id}\n"
+           f"💛 یوزرنیم: {username}\n"
+           f"👥 نام کامل: {fullname}\n"
+           f"📝 بیو: {bio}\n"
+           f"🖼️ تصویر پروفایل: {'دارد' if photos else 'ندارد'}\n"
+           "تعداد سفارشات ثبت شده : {count}")
         
         back_btn = [
             [Button.inline("بازگشت", data='back')]
         ]
         
-        await bot.send_message(entity=event.chat_id, message=profile_msg, buttons=back_btn)
-
-    # نمایش سوالات متداول
-    elif text == 'سوالات متداول ⚖️':
-        faq_msg = '''سوالات متداول:
-1. چطور می توانم سفارش ثبت کنم؟
-2. قیمت‌گذاری به چه صورت است؟
-3. نحوه پرداخت چگونه است؟
-برای راهنمایی بیشتر به پشتیبانی مراجعه کنید.'''
-        
-        await bot.send_message(entity=event.chat_id, message=faq_msg)
-
-    # مدیریت سفارشات
-    elif text == 'سفارشات 📄':
-        user_orders = get_user_orders(event.sender_id)
-        if user_orders:
-            orders_msg = "\n".join([f"📝 سفارش {order[0]} - وضعیت: {order[2]}" for order in user_orders])
-            await bot.send_message(entity=event.chat_id, message=f"سفارشات شما:\n{orders_msg}")
-        else:
-            await bot.send_message(entity=event.chat_id, message="شما هنوز سفارشی ثبت نکرده‌اید.")
-            
-# دریافت سفارشات کاربر از دیتابیس
-def get_user_orders(user_id):
-    cursor.execute("SELECT * FROM orders WHERE user_id = ?", (user_id,))
-    return cursor.fetchall()
-
-# مدیریت دکمه‌های Inline
-@bot.on(events.CallbackQuery)
-async def callback_handler(event):
-    if event.data == b'continue':
-        await event.answer('ادامه ثبت سفارش...')
-        # ادامه مراحل ثبت سفارش
-        await bot.send_message(event.chat_id, "لطفا جزئیات سفارش خود را وارد کنید:")
-        # فرض می‌کنیم جزئیات به صورت متنی از کاربر دریافت می‌شود.
-        await event.client.send_message(event.chat_id, "جزئیات سفارش:")
-    elif event.data == b'back':
-        await event.answer('بازگشت به منوی اصلی...')
-        # بازگشت به منوی اصلی
-        await start(event)
-
-# مدیریت درخواست پشتیبانی
-@bot.on(events.NewMessage(pattern=r'/support'))
-async def support_handler(event: Message):
-    support_msg = '''برای پشتیبانی بیشتر با ما تماس بگیرید:
-📧 ایمیل: support@mishop.com
-💬 تلگرام: @MiRALiSupport'''
+        await bot.send_file(entity=event.chat_id, file=profile_photo, caption=profile_msg, buttons=back_btn)
     
-    await bot.send_message(event.chat_id, support_msg)
+    # elif text == 'سفارشات 📄':
+            
+    #     full_user = await event.client(GetFullUserRequest(user_id))
+    #     user_id = event.sender_id
+    #     fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    
+    #     orders_msg = (f"کاربر گرامی <a href='tg://user?id={user_id}'>{fullname}<a>\n"
+    #         f"تعداد سفارشات ثبت شده توسط شما : {تعداد سفارشات همون کاربر} است\n"
+    #         f"تعداد سفارشات پذیرفته شده : {تعداد سفارشات تایید شده توسط ادمین}\n"
+    #         f"تعداد سفارشات رد شده : {تعداد سفارشات رد شده}"
+    #     )
+
+
+questions = [
+    "تمام ویژگی‌های رباتی که قصد سفارشش رو دارید رو در قالب یک پیام ارسال کنید.\n❗️ لطفاً خودتون توضیح بدید، ادمین مجموعه به صورت خودکار بررسی نمی‌کند.",
+    "نیاز به پنل ادمین درون ربات دارین یا خیر؟ (روی قیمت ربات تأثیر مستقیم خواهد داشت) ⁉️",
+    "در مورد ساخت ربات از بات فادر (دریافت API Token و ...) اطلاع دارین؟ ⁉️",
+    "ربات رو می‌تونید روی هاست یا سرور اجرا کنید؟ ‼️",
+    "هاست یا سرور رو از مجموعه ما می‌خرید؟",
+    "سورس کد رو دریافت می‌کنید یا که خود ادمین ربات رو برای شما اجرا کنه؟",
+    "نوع پرداخت رو هم مشخص کنید (ارزی یا تومانی) ❗"
+]
+
+def ensure_orders_directory():
+    """ایجاد پوشه orders در صورت عدم وجود."""
+    if not os.path.exists("orders"):
+        os.makedirs("orders")
+
+def save_order_data(user_id, data):
+    """ذخیره اطلاعات سفارش به صورت JSON."""
+    ensure_orders_directory()
+    with open(f"orders/{user_id}_order.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+def delete_order_data(user_id):
+    """حذف فایل سفارش کاربر پس از اتمام."""
+    file_path = f"orders/{user_id}_order.json"
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+@bot.on(events.CallbackQuery)
+async def callback(event):
+    if event.data == b'continue_create_order':
+        user_id = event.sender_id
+        user_data = {"step": 0, "answers": []}
+        save_order_data(user_id, user_data)
+
+        buttons = [[Button.inline("بازگشت ↩️", data="back")]]
+        await event.edit("ثبت سفارش شروع شد.\n" + questions[0], buttons=buttons)
+
+    elif event.data == b'back':
+        await event.delete() 
+        await start(event) 
+
+@bot.on(events.NewMessage)
+async def process_order(event):
+    user_id = event.sender_id
+    try:
+        with open(f"orders/{user_id}_order.json", "r", encoding="utf-8") as f:
+            user_data = json.load(f)
+    except FileNotFoundError:
+        return
+
+    if user_data["step"] < len(questions):
+        user_data["answers"].append(event.message.text)
+        user_data["step"] += 1
+
+        save_order_data(user_id, user_data)
+
+        if user_data["step"] < len(questions):
+            buttons = [[Button.inline("بازگشت ↩️", data="back")]]
+            await event.reply(questions[user_data["step"]], buttons=buttons)
+        else:
+            order_details = "\n".join([f"سوال {i + 1}: {answer}" for i, answer in enumerate(user_data["answers"])])
+            for admin_id in ADMIN_IDS:
+                await bot.send_message(admin_id, f"یک سفارش جدید از کاربر {user_id} دریافت شد:\n{order_details}")
+
+            await event.reply("سفارش شما با موفقیت ثبت شد! ✅")
+
+            delete_order_data(user_id)
+
 
 print('RUN')
 bot.run_until_disconnected()
