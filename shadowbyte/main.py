@@ -1,8 +1,11 @@
+import asyncio
 import json
 import os
 import random
 import sqlite3
 import string
+import time
+from asyncio import sleep
 
 from config import *
 from telethon import Button, TelegramClient, events
@@ -14,21 +17,26 @@ from telethon.tl.types import ChannelParticipantsSearch
 
 bot = TelegramClient('shadowbyte', api_id=api_id, api_hash=api_hash).start(bot_token=token)
 
+async def get_bot_username():
+    bot_user = await bot.get_me()
+    return bot_user.username
+
 ADMIN_IDS = admin_ids
 
+START_MSG = '''درود کاربر گرامی به ربات ثبت سفارش شدو بایت خوش اومدید
+این ربات برای ثبت سفارش ساخت ربات تلگرام از مجموعه @MiRALi_SHOP_OG ساخته شده.
+برای دریافت راهنمایی بیشتر درمورد ربات، میتونید از بخش راهنما استفاده کنید!'''
+
+START_BTN = [
+    [Button.text('ثبت سفارش 📝', resize=True, single_use=True)],
+    [Button.text('سفارشات 📄'), Button.text('مشخصات من 🔍')],
+    [Button.text('💡راهنما'), Button.text('سوالات متداول ⚖️')],
+    [Button.text('☎️ پشتیبانی')]
+]
+
 @bot.on(events.NewMessage(pattern=r'/start'))
-async def start(event: Message):
-    msg = '''درود کاربر گرامی به ربات ثبت سفارش شدو بایت خوش اومدید
-این ربات برای ثبت سفارش ساخت ربات تلگرام از مجموعه @MiRALi_SHOP_OG ساخته شده .
-برای دریافت راهنمایی بیشتر درمورد ربات ، میتونید از بخش راهنما استفاده کنید !
-'''
-    btn = [
-        [Button.text('ثبت سفارش 📝', resize=True, single_use=True)],
-        [Button.text('سفارشات 📄'), Button.text('مشخصات من 🔍')],
-        [Button.text('💡راهنما'), Button.text('سوالات متداول ⚖️')],
-        [Button.text('☎️ پشتیبانی')]
-    ]
-    await bot.send_message(entity=event.chat_id, message=msg, buttons=btn)
+async def start(event):
+    await bot.send_message(entity=event.chat_id, message=START_MSG, buttons=START_BTN)
 
 
 @bot.on(events.NewMessage)
@@ -55,33 +63,123 @@ async def start_handler(event: Message):
         create_order = await bot.send_message(entity=event.chat_id, message='اینجا بخش ثبت سفارش رباته \nبرای ادامه فرایند روی دکمه ادامه کلیک کنید \nدر غیر این صورت روی بازگشت کلیک کنید', buttons=order_btn)
 
     elif text == 'مشخصات من 🔍':
+        start_time = time.time()
+    
+        # ارسال پیام موقت
+        processing_message = await event.reply("⏳ در حال پردازش اطلاعات شما... لطفاً صبر کنید.")
+
+        try:
+            await asyncio.sleep(2.5)
+
+            profile_msg = (
+                f"👤 اطلاعات شما:\n"
+                f"🔑 آیدی عددی: <code>{user_id}</code>\n"
+                f"💛 یوزرنیم: @{username}\n"
+                f"👥 نام کامل: {fullname}\n"
+                f"📝 بیو: {bio}\n"
+                f"🖼️ تصویر پروفایل: {'دارد' if photos else 'ندارد'}\n"
+                "تعداد سفارشات ثبت شده : {count}"  # متغیر count باید از دیتابیس یا فایل به دست بیاد
+            )
+
+            await processing_message.delete()
+            
+            await asyncio.sleep(0.5)
+
+            await bot.send_file(entity=event.chat_id, file=profile_photo, caption=profile_msg, parse_mode='html')
+
+        except Exception as e:
+            await processing_message.edit(f"⚠️ خطایی رخ داد: {str(e)}")
+
+        print(f"Time taken: {time.time() - start_time} seconds")
+
         
-        profile_msg = (f"👤 اطلاعات شما:\n"
-           f"🔑 آیدی عددی: {user_id}\n"
-           f"💛 یوزرنیم: {username}\n"
-           f"👥 نام کامل: {fullname}\n"
-           f"📝 بیو: {bio}\n"
-           f"🖼️ تصویر پروفایل: {'دارد' if photos else 'ندارد'}\n"
-           "تعداد سفارشات ثبت شده : {count}")
+    elif text == 'سفارشات 📄':
+        # start_time = time.time()
+        # user_id = event.sender_id
+        # full_user = await event.client(GetFullUserRequest(user_id))
+        # user_id = event.sender_id
+        # fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
+
+        # processing_message = await event.reply("⏳ در حال پردازش سفارشات شما... لطفاً صبر کنید.")
+
+        # try:
+        #     await asyncio.sleep(0.5)
+
+        #     orders = [
+        #         {"status": "پذیرفته شده", "details": "سفارش 1"},
+        #         {"status": "رد شده", "details": "سفارش 2"},
+        #         {"status": "در انتظار تایید", "details": "سفارش 3"}
+        #     ]
+
+        #     if orders:
+        #         orders_text = "\n\n".join(
+        #             [f"📄 {o['details']}\nوضعیت: {o['status']}" for o in orders]
+        #         )
+        #         final_message = (f"کاربر گرامی <a href='tg://user?id={user_id}'>{fullname}</a>\n📦 سفارشات شما:\n\n{orders_text}")
+        #     else:
+        #         final_message = "❌ شما هنوز هیچ سفارشی ثبت نکرده‌اید."
+
+        #     await processing_message.edit(final_message, parse_mode='html')
+
+        # except Exception as e:
+        #     await processing_message.edit(f"⚠️ خطایی رخ داد: {str(e)}")
+
+        # print(f"Time taken: {time.time() - start_time} seconds")
+        await event.respond('این بخش موقتا از دسترس خارج شده')
+
+    elif text == '💡راهنما':
+        help_msg = (
+            "💡 <b>راهنمای استفاده از ربات:</b>\n\n"
+            "📌 <b>ثبت سفارش 📝:</b>\n"
+            "از این بخش می‌توانید برای ثبت سفارش ساخت ربات تلگرام اقدام کنید. مراحل سفارش شامل پاسخ به چند سوال ساده است و در نهایت سفارش شما برای بررسی به ادمین ارسال می‌شود.\n\n"
+            "📌 <b>سفارشات 📄:</b>\n"
+            "در این بخش می‌توانید وضعیت سفارش‌های خود را مشاهده کنید. اطلاعاتی مانند جزئیات سفارش و وضعیت آن (پذیرفته شده، رد شده، یا در انتظار) نمایش داده خواهد شد.\n\n"
+            "📌 <b>مشخصات من 🔍:</b>\n"
+            "این بخش اطلاعات حساب کاربری شما مانند آیدی عددی، نام کاربری، نام کامل، بیو و وضعیت تصویر پروفایل را نمایش می‌دهد.\n\n"
+            "📌 <b>💡 راهنما:</b>\n"
+            "با انتخاب این گزینه می‌توانید اطلاعات کامل درباره ویژگی‌های ربات و نحوه استفاده از هر بخش را مطالعه کنید.\n\n"
+            "📌 <b>سوالات متداول ⚖️:</b>\n"
+            "سوالات پرتکرار و توضیحات مربوط به قوانین و شرایط استفاده از خدمات ما در این بخش قرار دارد.\n\n"
+            "📌 <b>☎️ پشتیبانی:</b>\n"
+            "اگر نیاز به راهنمایی بیشتر دارید یا سوال و پیشنهادی دارید، می‌توانید از این بخش با تیم پشتیبانی ارتباط برقرار کنید.\n\n"
+            "🚀 <b>ویژگی‌های اصلی ربات:</b>\n"
+            "✔️ ثبت سفارش سریع و ساده\n"
+            "✔️ نمایش وضعیت سفارش‌ها\n"
+            "✔️ مشاهده اطلاعات حساب کاربری\n"
+            "✔️ پشتیبانی 24/7\n\n"
+            "📩 برای شروع کافیست یکی از گزینه‌های موجود در منو را انتخاب کنید!"
+        )
         
-        back_btn = [
-            [Button.inline("بازگشت", data='back')]
+        await event.reply(help_msg, parse_mode='html')
+
+    
+    elif text == 'سوالات متداول ⚖️':
+        question_btn = [
+            [Button.url(text='ورود به بخش سوالات متداول', url='https://t.me/Miralishop')],
+            [Button.inline(text='بازگشت 🔙', data='back')]
+        ]
+        await bot.send_message(
+            entity=event.chat_id,
+            message=('📔 به بخش سوالات متداول خوش اومدید \n'
+                     '🌀برای دونستن قوانین و شرایط خرید از مجموعه ما روی دکمه زیر کلیک کنید و در غیر این صورت روی بازگشت کلیک کنید !'
+            ),
+            buttons=question_btn
+        )
+    
+    elif text == '☎️ پشتیبانی':
+        support_btn = [
+            [Button.inline(text='گزارش ایراد ربات', )],
+            [Button.inline(text='ارتباط با پشتیبانی')]
         ]
         
-        await bot.send_file(entity=event.chat_id, file=profile_photo, caption=profile_msg, buttons=back_btn)
-    
-    # elif text == 'سفارشات 📄':
-            
-    #     full_user = await event.client(GetFullUserRequest(user_id))
-    #     user_id = event.sender_id
-    #     fullname = f"{user.first_name or ''} {user.last_name or ''}".strip()
-    
-    #     orders_msg = (f"کاربر گرامی <a href='tg://user?id={user_id}'>{fullname}<a>\n"
-    #         f"تعداد سفارشات ثبت شده توسط شما : {تعداد سفارشات همون کاربر} است\n"
-    #         f"تعداد سفارشات پذیرفته شده : {تعداد سفارشات تایید شده توسط ادمین}\n"
-    #         f"تعداد سفارشات رد شده : {تعداد سفارشات رد شده}"
-    #     )
+        supp = await bot.send_message(entity=event.chat_id,
+                                    message='''🔰 کاربر گرامی به بخش پشتیبانی ربات خوش اومدی 
 
+⚙️ اگر ربات ایرادی داره روی دکمه "گزارش ایراد ربات" کلیک کن 💎
+📍 اگر حرف ، پیشنهاد یا انتقادی داری روی دکمه "ارتباط با پشتیبانی" کلیک کنی 💎''',
+                                    buttons=support_btn
+        )
+        
 
 questions = [
     "تمام ویژگی‌های رباتی که قصد سفارشش رو دارید رو در قالب یک پیام ارسال کنید.\n❗️ لطفاً خودتون توضیح بدید، ادمین مجموعه به صورت خودکار بررسی نمی‌کند.",
@@ -151,6 +249,11 @@ async def process_order(event):
 
             delete_order_data(user_id)
 
+@bot.on(events.CallbackQuery(data='back'))
+async def back(event):
+    await event.delete()
+    
+    await bot.send_message(event.chat_id, message=START_MSG, buttons=START_BTN)
 
 print('RUN')
 bot.run_until_disconnected()
